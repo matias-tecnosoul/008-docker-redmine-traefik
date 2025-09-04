@@ -36,13 +36,13 @@ chmod +x setup.sh
 
 ```bash
 # Iniciar en background
-docker-compose up -d
+docker compose up -d
 
 # Ver logs
-docker-compose logs -f
+docker compose logs -f
 
 # Verificar servicios
-docker-compose ps
+docker compose ps
 ```
 
 ### 3. Acceder a los servicios
@@ -89,10 +89,10 @@ Traefik utiliza:
 
 ```bash
 # Ver las instancias de Redmine
-docker-compose ps redmine
+docker compose ps redmine
 
 # Logs de todas las instancias
-docker-compose logs redmine
+docker compose logs redmine
 
 # Verificar balanceador
 curl -k https://redmine.localhost
@@ -114,13 +114,13 @@ Si hay problemas con sesiones:
 
 ```bash
 # Verificar Redis
-docker-compose exec redis redis-cli ping
+docker compose exec redis redis-cli ping
 
 # Ver logs de Redmine
-docker-compose logs redmine
+docker compose logs redmine
 
 # Restart específico de Redmine
-docker-compose restart redmine
+docker compose restart redmine
 ```
 
 ### Verificar conectividad
@@ -138,14 +138,14 @@ systemd-resolve --status
 
 ```bash
 # Escalar Redmine manualmente
-docker-compose up -d --scale redmine=5
+docker compose up -d --scale redmine=5
 
 # Rebuild y restart
-docker-compose down
-docker-compose up -d --build
+docker compose down
+docker compose up -d --build
 
 # Limpiar todo
-docker-compose down -v
+docker compose down -v
 docker system prune -f
 ```
 
