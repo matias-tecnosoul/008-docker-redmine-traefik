@@ -1,21 +1,30 @@
-#!/bin/bash
+# 1. Detener Apache local
+sudo systemctl stop apache2 2>/dev/null || sudo systemctl stop httpd 2>/dev/null
+echo "✅ Apache detenido temporalmente"
 
-# Script de configuración inicial para el entorno Redmine
+# 2. Detener servicios Docker actuales
+docker-compose down
+echo "✅ Servicios Docker detenidos"
 
-echo "🚀 Configurando entorno Redmine con Docker Compose..."
+# 3. Verificar que el puerto 80 esté libre
+sudo netstat -tlnp | grep :80 || echo "✅ Puerto 80 libre"
 
-# Crear directorios necesarios
+# 4. Crear los directorios y archivos necesarios si no existen
 mkdir -p traefik/certs
 mkdir -p redmine-config
 
-# Generar certificados autofirmados para localhost
-echo "🔐 Generando certificados SSL autofirmados..."
-openssl req -x509 -newkey rsa:4096 -keyout traefik/certs/localhost.key -out traefik/certs/localhost.crt -days 365 -nodes -subj '/CN=localhost'
+# 5. Generar certificado SSL si no existe
+if [ ! -f "traefik/certs/localhost.crt" ]; then
+    openssl req -x509 -newkey rsa:4096 \
+        -keyout traefik/certs/localhost.key \
+        -out traefik/certs/localhost.crt \
+        -days 365 -nodes \
+        -subj '/CN=localhost/subjectAltName=DNS:localhost,DNS:*.localhost'
+    echo "✅ Certificado SSL generado"
+fi
 
-# Crear el archivo de configuración dinámica de Traefik si no existe
-if [ ! -f traefik/dynamic.yml ]; then
-    echo "📄 Creando configuración dinámica de Traefik..."
-    cat > traefik/dynamic.yml << 'EOF'
+# 6. Crear configuración dinámica de Traefik
+cat > traefik/dynamic.yml << 'EOF'
 tls:
   certificates:
     - certFile: /etc/ssl/traefik/localhost.crt
@@ -26,10 +35,9 @@ tls:
         certFile: /etc/ssl/traefik/localhost.crt
         keyFile: /etc/ssl/traefik/localhost.key
 EOF
-fi
+echo "✅ Configuración dinámica de Traefik creada"
 
-# Crear configuración de sesiones Redis para Redmine
-echo "⚙️ Configurando almacenamiento de sesiones Redis..."
+# 7. Crear configuración de sesiones Redis para Redmine
 cat > redmine-config/session_store.rb << 'EOF'
 require 'redis'
 
@@ -48,20 +56,8 @@ Rails.application.config.session_store :redis_store,
   secure: false,
   httponly: true
 EOF
+echo "✅ Configuración de sesiones Redis creada"
 
-# Dar permisos apropiados
-chmod 600 traefik/certs/*
-chmod 755 setup.sh
-
-echo "✅ Configuración completada!"
 echo ""
-echo "Para iniciar los servicios ejecuta:"
-echo "  docker-compose up -d"
-echo ""
-echo "Los servicios estarán disponibles en:"
-echo "  🌍 Redmine:     https://redmine.localhost"
-echo "  📊 PgAdmin:     https://pgadmin.localhost"
-echo "  📧 MailDev:     https://maildev.localhost"
-echo "  🔧 Traefik:     https://traefik.localhost"
-echo ""
-echo "⚠️  Acepta los certificados autofirmados en tu navegador"
+echo "🚀 Ahora actualiza tu docker-compose.yml y ejecuta:"
+echo "   docker compose up -d"

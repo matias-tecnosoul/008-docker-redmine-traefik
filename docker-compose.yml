@@ -7,19 +7,13 @@ services:
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
-      - "--certificatesresolvers.myresolver.acme.email=test@example.com"
-      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-      # Para certificados autofirmados locales
       - "--providers.file.filename=/etc/traefik/dynamic.yml"
     ports:
-      - "8080:80"
-      - "8443:443"
-      - "8081:8080"  # Dashboard de Traefik
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik:/letsencrypt
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/certs:/etc/ssl/traefik:ro
     networks:
@@ -27,10 +21,9 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
-      - "traefik.http.routers.dashboard.entrypoints=websecure"
-      - "traefik.http.routers.dashboard.tls=true"
+      - "traefik.http.routers.dashboard.entrypoints=web"
+      - "traefik.http.routers.dashboard.service=api@internal"
 
-  # Base de datos para Redmine
   db:
     image: postgres:13
     environment:
@@ -47,19 +40,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis para manejo de sesiones
-  redis:
-    image: redis:7-alpine
-    networks:
-      - backend
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
-  # Redmine escalado
-  redmine:
+  # Primera instancia - Ejecuta migraciones
+  redmine-1:
     image: redmine:5.0
     environment:
       REDMINE_DB_POSTGRES: db
@@ -67,35 +49,99 @@ services:
       REDMINE_DB_USERNAME: redmine
       REDMINE_DB_PASSWORD: redmine_password
       REDMINE_SECRET_KEY_BASE: supersecretkey123456789abcdefghijklmnop
-      # Configuración para Redis sessions
-      REDMINE_PLUGINS_MIGRATE: 1
     volumes:
       - redmine_files:/usr/src/redmine/files
       - redmine_plugins:/usr/src/redmine/plugins
-      - ./redmine-config:/usr/src/redmine/config/initializers
     networks:
       - backend
       - traefik-net
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-    #Creamos las Replicas para escalar
-    deploy:
-      replicas: 3
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
       - "traefik.http.routers.redmine.entrypoints=websecure"
       - "traefik.http.routers.redmine.tls=true"
       - "traefik.http.services.redmine.loadbalancer.server.port=3000"
-      - "traefik.docker.network=redmine_traefik-net"
-      # Sticky sessions usando cookies
       - "traefik.http.services.redmine.loadbalancer.sticky.cookie=true"
       - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
+      - "traefik.http.services.redmine.loadbalancer.healthcheck.path=/"
+      - "traefik.http.services.redmine.loadbalancer.healthcheck.interval=30s"
+      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
 
-  # PgAdmin para PostgreSQL
+  # Segunda instancia - No ejecuta migraciones
+  redmine-2:
+    image: redmine:5.0
+    environment:
+      REDMINE_DB_POSTGRES: db
+      REDMINE_DB_DATABASE: redmine
+      REDMINE_DB_USERNAME: redmine
+      REDMINE_DB_PASSWORD: redmine_password
+      REDMINE_SECRET_KEY_BASE: supersecretkey123456789abcdefghijklmnop
+      REDMINE_SKIP_DB_MIGRATE: "true"  # Skip migrations
+    volumes:
+      - redmine_files:/usr/src/redmine/files
+      - redmine_plugins:/usr/src/redmine/plugins
+    networks:
+      - backend
+      - traefik-net
+    depends_on:
+      redmine-1:
+        condition: service_started  # Wait for redmine-1 to start first
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
+      - "traefik.http.routers.redmine.entrypoints=websecure"
+      - "traefik.http.routers.redmine.tls=true"
+      - "traefik.http.services.redmine.loadbalancer.server.port=3000"
+      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
+
+  # Tercera instancia - No ejecuta migraciones
+  redmine-3:
+    image: redmine:5.0
+    environment:
+      REDMINE_DB_POSTGRES: db
+      REDMINE_DB_DATABASE: redmine
+      REDMINE_DB_USERNAME: redmine
+      REDMINE_DB_PASSWORD: redmine_password
+      REDMINE_SECRET_KEY_BASE: supersecretkey123456789abcdefghijklmnop
+      REDMINE_SKIP_DB_MIGRATE: "true"  # Skip migrations
+    volumes:
+      - redmine_files:/usr/src/redmine/files
+      - redmine_plugins:/usr/src/redmine/plugins
+    networks:
+      - backend
+      - traefik-net
+    depends_on:
+      redmine-1:
+        condition: service_started  # Wait for redmine-1 to start first
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
+      - "traefik.http.routers.redmine.entrypoints=websecure"
+      - "traefik.http.routers.redmine.tls=true"
+      - "traefik.http.services.redmine.loadbalancer.server.port=3000"
+      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
+
   pgadmin:
     image: dpage/pgadmin4
     environment:
@@ -114,7 +160,6 @@ services:
       - "traefik.http.routers.pgadmin.tls=true"
       - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
 
-  # MailDev para pruebas de email
   maildev:
     image: maildev/maildev
     networks:
