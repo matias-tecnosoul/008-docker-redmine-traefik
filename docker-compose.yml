@@ -1,0 +1,139 @@
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+      - "--certificatesresolvers.myresolver.acme.email=test@example.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      # Para certificados autofirmados locales
+      - "--providers.file.filename=/etc/traefik/dynamic.yml"
+    ports:
+      - "8080:80"
+      - "8443:443"
+      - "8081:8080"  # Dashboard de Traefik
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/letsencrypt
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./traefik/certs:/etc/ssl/traefik:ro
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls=true"
+
+  # Base de datos para Redmine
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: redmine
+      POSTGRES_USER: redmine
+      POSTGRES_PASSWORD: redmine_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redmine"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis para manejo de sesiones
+  redis:
+    image: redis:7-alpine
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Redmine escalado
+  redmine:
+    image: redmine:5.0
+    environment:
+      REDMINE_DB_POSTGRES: db
+      REDMINE_DB_DATABASE: redmine
+      REDMINE_DB_USERNAME: redmine
+      REDMINE_DB_PASSWORD: redmine_password
+      REDMINE_SECRET_KEY_BASE: supersecretkey123456789abcdefghijklmnop
+      # Configuración para Redis sessions
+      REDMINE_PLUGINS_MIGRATE: 1
+    volumes:
+      - redmine_files:/usr/src/redmine/files
+      - redmine_plugins:/usr/src/redmine/plugins
+      - ./redmine-config:/usr/src/redmine/config/initializers
+    networks:
+      - backend
+      - traefik-net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
+      - "traefik.http.routers.redmine.entrypoints=websecure"
+      - "traefik.http.routers.redmine.tls=true"
+      - "traefik.http.services.redmine.loadbalancer.server.port=3000"
+      - "traefik.docker.network=redmine_traefik-net"
+      # Sticky sessions usando cookies
+      - "traefik.http.services.redmine.loadbalancer.sticky.cookie=true"
+      - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
+
+  # PgAdmin para PostgreSQL
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_LISTEN_PORT: 80
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - backend
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.localhost`)"
+      - "traefik.http.routers.pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin.tls=true"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+
+  # MailDev para pruebas de email
+  maildev:
+    image: maildev/maildev
+    networks:
+      - backend
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.maildev.rule=Host(`maildev.localhost`)"
+      - "traefik.http.routers.maildev.entrypoints=websecure"
+      - "traefik.http.routers.maildev.tls=true"
+      - "traefik.http.services.maildev.loadbalancer.server.port=1080"
+
+volumes:
+  postgres_data:
+  redmine_files:
+  redmine_plugins:
+  pgadmin_data:
+
+networks:
+  traefik-net:
+    driver: bridge
+  backend:
+    driver: bridge
