@@ -10,8 +10,11 @@ services:
       - "--providers.docker=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
+      - "--providers.file.filename=/traefik.yml"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik.yml:/traefik.yml
+      - ./certs:/certs
 
   db:
     image: postgres:13
@@ -34,8 +37,10 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
-      - "traefik.http.routers.redmine.entrypoints=web"
+      - "traefik.http.routers.redmine.entrypoints=websecure"
+      - "traefik.http.routers.redmine.tls=true"
       - "traefik.http.services.redmine.loadbalancer.server.port=3000"
+      - "traefik.http.services.redmine.loadbalancer.sticky.cookie=true"
 
   pgadmin:
     image: dpage/pgadmin4
@@ -45,7 +50,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.localhost`)"
-      - "traefik.http.routers.pgadmin.entrypoints=web"
+      - "traefik.http.routers.pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin.tls=true"
       - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
 
   maildev:
@@ -53,7 +59,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.maildev.rule=Host(`maildev.localhost`)"
-      - "traefik.http.routers.maildev.entrypoints=web"
+      - "traefik.http.routers.maildev.entrypoints=websecure"
+      - "traefik.http.routers.maildev.tls=true"
       - "traefik.http.services.maildev.loadbalancer.server.port=1080"
 
 volumes:
