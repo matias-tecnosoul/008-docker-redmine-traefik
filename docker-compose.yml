@@ -74,7 +74,6 @@ services:
       - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
       - "traefik.http.services.redmine.loadbalancer.healthcheck.path=/"
       - "traefik.http.services.redmine.loadbalancer.healthcheck.interval=30s"
-      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
 
   # Segunda instancia - No ejecuta migraciones
   redmine-2:
@@ -107,7 +106,10 @@ services:
       - "traefik.http.routers.redmine.entrypoints=websecure"
       - "traefik.http.routers.redmine.tls=true"
       - "traefik.http.services.redmine.loadbalancer.server.port=3000"
-      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
+      - "traefik.http.services.redmine.loadbalancer.sticky.cookie=true"
+      - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
+      - "traefik.http.services.redmine.loadbalancer.healthcheck.path=/"
+      - "traefik.http.services.redmine.loadbalancer.healthcheck.interval=30s"
 
   # Tercera instancia - No ejecuta migraciones
   redmine-3:
@@ -140,7 +142,10 @@ services:
       - "traefik.http.routers.redmine.entrypoints=websecure"
       - "traefik.http.routers.redmine.tls=true"
       - "traefik.http.services.redmine.loadbalancer.server.port=3000"
-      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
+      - "traefik.http.services.redmine.loadbalancer.sticky.cookie=true"
+      - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
+      - "traefik.http.services.redmine.loadbalancer.healthcheck.path=/"
+      - "traefik.http.services.redmine.loadbalancer.healthcheck.interval=30s"
 
   pgadmin:
     image: dpage/pgadmin4
