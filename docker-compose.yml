@@ -18,6 +18,7 @@ services:
       - ./traefik/certs:/etc/ssl/traefik:ro
     networks:
       - traefik-net
+      - backend 
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
@@ -52,6 +53,7 @@ services:
     volumes:
       - redmine_files:/usr/src/redmine/files
       - redmine_plugins:/usr/src/redmine/plugins
+      - redmine_config:/usr/src/redmine/config  # ✅ Volumen compartido para config
     networks:
       - backend
       - traefik-net
@@ -59,11 +61,11 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --timeout=5 --spider http://localhost:3000/login || exit 1"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 120s  
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
@@ -74,6 +76,7 @@ services:
       - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
       - "traefik.http.services.redmine.loadbalancer.healthcheck.path=/"
       - "traefik.http.services.redmine.loadbalancer.healthcheck.interval=30s"
+      - "traefik.docker.network=traefik-net"  # ✅ Forzar uso de traefik-net
 
   # Segunda instancia - No ejecuta migraciones
   redmine-2:
@@ -88,17 +91,18 @@ services:
     volumes:
       - redmine_files:/usr/src/redmine/files
       - redmine_plugins:/usr/src/redmine/plugins
+      - redmine_config:/usr/src/redmine/config  # ✅ Volumen compartido para config
     networks:
       - backend
       - traefik-net
     depends_on:
       redmine-1:
-        condition: service_started  # Wait for redmine-1 to start first
+        condition: service_healthy  # Cambiar de started a healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --timeout=5 --spider http://localhost:3000/login || exit 1"]
       interval: 30s
-      timeout: 10s
-      retries: 3
+      timeout: 15s
+      retries: 10
       start_period: 60s
     labels:
       - "traefik.enable=true"
@@ -110,6 +114,7 @@ services:
       - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
       - "traefik.http.services.redmine.loadbalancer.healthcheck.path=/"
       - "traefik.http.services.redmine.loadbalancer.healthcheck.interval=30s"
+      - "traefik.docker.network=traefik-net"  # ✅ Forzar uso de traefik-net
 
   # Tercera instancia - No ejecuta migraciones
   redmine-3:
@@ -124,17 +129,18 @@ services:
     volumes:
       - redmine_files:/usr/src/redmine/files
       - redmine_plugins:/usr/src/redmine/plugins
+      - redmine_config:/usr/src/redmine/config  # ✅ Volumen compartido para config
     networks:
       - backend
       - traefik-net
     depends_on:
       redmine-1:
-        condition: service_started  # Wait for redmine-1 to start first
+        condition: service_healthy  # Cambiar de started a healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --timeout=5 --spider http://localhost:3000/login || exit 1"]
       interval: 30s
-      timeout: 10s
-      retries: 3
+      timeout: 15s
+      retries: 10
       start_period: 60s
     labels:
       - "traefik.enable=true"
@@ -146,6 +152,7 @@ services:
       - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
       - "traefik.http.services.redmine.loadbalancer.healthcheck.path=/"
       - "traefik.http.services.redmine.loadbalancer.healthcheck.interval=30s"
+      - "traefik.docker.network=traefik-net"  # ✅ Forzar uso de traefik-net
 
   pgadmin:
     image: dpage/pgadmin4
@@ -181,6 +188,7 @@ volumes:
   postgres_data:
   redmine_files:
   redmine_plugins:
+  redmine_config:  # ✅ Nuevo volumen para configuración
   pgadmin_data:
 
 networks:
