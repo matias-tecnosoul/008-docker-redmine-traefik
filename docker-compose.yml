@@ -1,185 +1,60 @@
 services:
   traefik:
     image: traefik:v2.10
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      - "--providers.file.filename=/etc/traefik/dynamic.yml"
     ports:
       - "80:80"
       - "443:443"
       - "8080:8080"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
-      - ./traefik/certs:/etc/ssl/traefik:ro
-    networks:
-      - traefik-net
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
-      - "traefik.http.routers.dashboard.entrypoints=web"
-      - "traefik.http.routers.dashboard.service=api@internal"
+      - /var/run/docker.sock:/var/run/docker.sock
 
   db:
     image: postgres:13
     environment:
       POSTGRES_DB: redmine
       POSTGRES_USER: redmine
-      POSTGRES_PASSWORD: redmine_password
+      POSTGRES_PASSWORD: secret
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - backend
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U redmine"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - db_data:/var/lib/postgresql/data
 
-  # Primera instancia - Ejecuta migraciones
-  redmine-1:
+  redmine:
     image: redmine:5.0
+    depends_on:
+      - db
     environment:
       REDMINE_DB_POSTGRES: db
       REDMINE_DB_DATABASE: redmine
       REDMINE_DB_USERNAME: redmine
-      REDMINE_DB_PASSWORD: redmine_password
-      REDMINE_SECRET_KEY_BASE: supersecretkey123456789abcdefghijklmnop
-    volumes:
-      - redmine_files:/usr/src/redmine/files
-      - redmine_plugins:/usr/src/redmine/plugins
-    networks:
-      - backend
-      - traefik-net
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      REDMINE_DB_PASSWORD: secret
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
-      - "traefik.http.routers.redmine.entrypoints=websecure"
-      - "traefik.http.routers.redmine.tls=true"
+      - "traefik.http.routers.redmine.entrypoints=web"
       - "traefik.http.services.redmine.loadbalancer.server.port=3000"
-      - "traefik.http.services.redmine.loadbalancer.sticky.cookie=true"
-      - "traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session"
-      - "traefik.http.services.redmine.loadbalancer.healthcheck.path=/"
-      - "traefik.http.services.redmine.loadbalancer.healthcheck.interval=30s"
-      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
-
-  # Segunda instancia - No ejecuta migraciones
-  redmine-2:
-    image: redmine:5.0
-    environment:
-      REDMINE_DB_POSTGRES: db
-      REDMINE_DB_DATABASE: redmine
-      REDMINE_DB_USERNAME: redmine
-      REDMINE_DB_PASSWORD: redmine_password
-      REDMINE_SECRET_KEY_BASE: supersecretkey123456789abcdefghijklmnop
-      REDMINE_SKIP_DB_MIGRATE: "true"  # Skip migrations
-    volumes:
-      - redmine_files:/usr/src/redmine/files
-      - redmine_plugins:/usr/src/redmine/plugins
-    networks:
-      - backend
-      - traefik-net
-    depends_on:
-      redmine-1:
-        condition: service_started  # Wait for redmine-1 to start first
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
-      - "traefik.http.routers.redmine.entrypoints=websecure"
-      - "traefik.http.routers.redmine.tls=true"
-      - "traefik.http.services.redmine.loadbalancer.server.port=3000"
-      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
-
-  # Tercera instancia - No ejecuta migraciones
-  redmine-3:
-    image: redmine:5.0
-    environment:
-      REDMINE_DB_POSTGRES: db
-      REDMINE_DB_DATABASE: redmine
-      REDMINE_DB_USERNAME: redmine
-      REDMINE_DB_PASSWORD: redmine_password
-      REDMINE_SECRET_KEY_BASE: supersecretkey123456789abcdefghijklmnop
-      REDMINE_SKIP_DB_MIGRATE: "true"  # Skip migrations
-    volumes:
-      - redmine_files:/usr/src/redmine/files
-      - redmine_plugins:/usr/src/redmine/plugins
-    networks:
-      - backend
-      - traefik-net
-    depends_on:
-      redmine-1:
-        condition: service_started  # Wait for redmine-1 to start first
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
-      - "traefik.http.routers.redmine.entrypoints=websecure"
-      - "traefik.http.routers.redmine.tls=true"
-      - "traefik.http.services.redmine.loadbalancer.server.port=3000"
-      - "traefik.docker.network=008-docker-redmine-traefik_traefik-net"
 
   pgadmin:
     image: dpage/pgadmin4
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
-      PGADMIN_LISTEN_PORT: 80
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - backend
-      - traefik-net
+      PGADMIN_DEFAULT_PASSWORD: admin
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.localhost`)"
-      - "traefik.http.routers.pgadmin.entrypoints=websecure"
-      - "traefik.http.routers.pgadmin.tls=true"
+      - "traefik.http.routers.pgadmin.entrypoints=web"
       - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
 
   maildev:
     image: maildev/maildev
-    networks:
-      - backend
-      - traefik-net
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.maildev.rule=Host(`maildev.localhost`)"
-      - "traefik.http.routers.maildev.entrypoints=websecure"
-      - "traefik.http.routers.maildev.tls=true"
+      - "traefik.http.routers.maildev.entrypoints=web"
       - "traefik.http.services.maildev.loadbalancer.server.port=1080"
 
 volumes:
-  postgres_data:
-  redmine_files:
-  redmine_plugins:
-  pgadmin_data:
-
-networks:
-  traefik-net:
-    driver: bridge
-  backend:
-    driver: bridge
+  db_data:
