@@ -1,38 +1,29 @@
 # 008-docker-redmine-traefik
 # Redmine Escalado con Docker Compose y Traefik
 
-Este proyecto implementa una solución completa para ejecutar Redmine escalado con múltiples instancias, utilizando Traefik como load balancer y Redis para el manejo de sesiones.
+Este proyecto implementa una solución completa para ejecutar Redmine escalado con múltiples instancias, utilizando Traefik como load balancer con manejo de sesiones sticky.
 
 ## Arquitectura
 
 - **Traefik**: Load balancer con service discovery automático y terminación SSL
 - **Redmine**: 3 instancias escaladas horizontalmente
 - **PostgreSQL**: Base de datos principal
-- **Redis**: Almacenamiento de sesiones compartidas
 - **PgAdmin**: Administrador de base de datos PostgreSQL
 - **MailDev**: Servidor de correo para desarrollo/testing
 
 ## Manejo de Sesiones
 
-El problema principal al escalar Redmine es el manejo de sesiones. Por defecto, Rails almacena las sesiones en cookies o en archivos locales, lo que causa problemas cuando las requests van a diferentes instancias.
+El problema principal al escalar Redmine es el manejo de sesiones. Por defecto, Rails almacena las sesiones en memoria, lo que causa problemas cuando las requests van a diferentes instancias.
 
 ### Solución implementada:
 
-1. **Redis como session store**: Configurado en `redmine-config/session_store.rb`
-2. **Sesiones compartidas**: Todas las instancias de Redmine comparten el mismo Redis
-3. **Sticky sessions**: Traefik usa cookies para dirigir al usuario a la misma instancia (backup)
+1. **Sticky sessions con Traefik**: Usa cookies para dirigir al usuario a la misma instancia
+2. **Cookie name personalizado**: `redmine_session` para consistencia
+3. **Health checks robustos**: Verificación en endpoint `/login`
 
 ## Configuración
 
-### 1. Preparar el entorno
-
-```bash
-# Hacer ejecutable y correr el script de setup
-chmod +x setup.sh
-./setup.sh
-```
-
-### 2. Levantar los servicios
+### 1. Levantar los servicios
 
 ```bash
 # Iniciar en background
@@ -45,83 +36,89 @@ docker compose logs -f
 docker compose ps
 ```
 
-### 3. Acceder a los servicios
+### 2. Acceder a los servicios
 
 | Servicio | URL | Credenciales |
 |----------|-----|--------------|
-| Redmine | https://redmine.localhost | admin/admin (por defecto) |
+| Redmine | https://redmine.localhost | admin/admin (primer login) |
 | PgAdmin | https://pgadmin.localhost | admin@example.com / admin123 |
 | MailDev | https://maildev.localhost | - |
-| Traefik Dashboard | https://traefik.localhost | - |
+| Traefik Dashboard | http://traefik.localhost:8080 | - |
 
 ## Detalles técnicos
 
 ### Escalado de Redmine
 
-```yaml
-deploy:
-  replicas: 3
-```
+- **redmine-1**: Instancia principal que ejecuta migraciones de BD
+- **redmine-2/3**: Instancias secundarias que skipean migraciones
+- **Dependencias controladas**: Las instancias esperan a que la principal esté healthy
 
-Traefik automáticamente detecta las 3 instancias y distribuye la carga entre ellas.
-
-### Load Balancing
+### Load Balancing con Traefik
 
 Traefik utiliza:
-- **Service Discovery**: Detecta automáticamente los contenedores
-- **Health Checks**: Verifica que los servicios estén saludables
-- **Sticky Sessions**: Mantiene al usuario en la misma instancia usando cookies
-- **SSL Termination**: Maneja certificados HTTPS
+- **Service Discovery**: Detecta automáticamente los 3 contenedores de Redmine
+- **Health Checks**: Verificación en `/login` cada 10 segundos
+- **Sticky Sessions**: Cookie `redmine_session` mantiene al usuario en la misma instancia
+- **SSL Termination**: HTTPS con certificados autofirmados
+
+### Configuración crítica
+
+```yaml
+# Health checks optimizados
+traefik.http.services.redmine.loadbalancer.healthcheck.path=/login
+traefik.http.services.redmine.loadbalancer.healthcheck.interval=10s
+
+# Sticky sessions
+traefik.http.services.redmine.loadbalancer.sticky.cookie=true
+traefik.http.services.redmine.loadbalancer.sticky.cookie.name=redmine_session
+
+# Red correcta para conectividad
+traefik.docker.network=traefik-net
+```
 
 ### Redes
 
-- **traefik-net**: Red pública para servicios expuestos
-- **backend**: Red privada para comunicación entre servicios
+- **traefik-net**: Red pública para servicios expuestos (172.19.0.0/24)
+- **backend**: Red privada para comunicación entre servicios (172.18.0.0/24)
+- **Conectividad garantizada**: Todos los servicios conectados a las redes apropiadas
 
 ### Volúmenes persistentes
 
 - `postgres_data`: Datos de PostgreSQL
 - `redmine_files`: Archivos subidos a Redmine
 - `redmine_plugins`: Plugins de Redmine
+- `redmine_config`: Configuración compartida entre instancias
 - `pgadmin_data`: Configuración de PgAdmin
 
 ## Verificación del escalado
 
 ```bash
-# Ver las instancias de Redmine
+# Ver las 3 instancias de Redmine
 docker compose ps redmine
 
-# Logs de todas las instancias
-docker compose logs redmine
+# Verificar balanceo en Traefik dashboard
+curl -s http://traefik.localhost:8080/api/http/services | jq .
 
-# Verificar balanceador
-curl -k https://redmine.localhost
+# Test de carga
+for i in {1..10}; do
+  curl -s -k https://redmine.localhost | grep "Redmine" | head -1
+done
 ```
 
 ## Troubleshooting
 
+### Problemas comunes resueltos
+
+1. **Migraciones concurrentes**: Solo redmine-1 ejecuta migraciones, las demás skipean
+2. **Configuración compartida**: Volumen `redmine_config` para database.yml
+3. **Conectividad de red**: Traefik conectado a ambas redes (traefik-net y backend)
+4. **Health checks**: Usando endpoint `/login` en lugar de `/`
+
 ### Certificados SSL
 
-Los certificados son autofirmados, por lo que el navegador mostrará una advertencia. Para aceptarlos:
-
-1. Ve a cada URL
-2. Acepta el certificado autofirmado
-3. O agrega los certificados a tu trust store del sistema
-
-### Problemas de sesiones
-
-Si hay problemas con sesiones:
-
-```bash
-# Verificar Redis
-docker compose exec redis redis-cli ping
-
-# Ver logs de Redmine
-docker compose logs redmine
-
-# Restart específico de Redmine
-docker compose restart redmine
-```
+Los certificados son autofirmados. Para aceptarlos:
+- Navegar a cada URL y aceptar la excepción de seguridad
+- O importar certificados desde `./traefik/certs/`
 
 ### Verificar conectividad
 
@@ -130,31 +127,22 @@ docker compose restart redmine
 ping redmine.localhost
 ping pgadmin.localhost
 
-# En Arch/Manjaro, verificar systemd-resolved
-systemd-resolve --status
+# Verificar redes de contenedores
+docker inspect <container_id> --format='{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}'
 ```
 
 ## Comandos útiles
 
 ```bash
-# Escalar Redmine manualmente
-docker compose up -d --scale redmine=5
+# Reiniciar solo Redmine
+docker compose restart redmine-1 redmine-2 redmine-3
 
-# Rebuild y restart
-docker compose down
-docker compose up -d --build
+# Ver logs específicos
+docker compose logs redmine-1
+docker compose logs redmine-2
+docker compose logs redmine-3
 
 # Limpiar todo
 docker compose down -v
-docker system prune -f
 ```
 
-## Notas para producción
-
-Para un entorno de producción considera:
-
-1. **Certificados reales**: Usar Let's Encrypt o certificados comerciales
-2. **Secrets management**: No hardcodear passwords
-3. **Backup strategy**: Para bases de datos y archivos
-4. **Monitoring**: Añadir Prometheus/Grafana
-5. **Security**: Configurar firewalls y accesos más restrictivos
