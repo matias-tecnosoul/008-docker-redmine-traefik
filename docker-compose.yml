@@ -10,11 +10,9 @@ services:
       - "--providers.docker=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      - "--providers.file.filename=/traefik.yml"
+      - "--entrypoints.websecure.http.tls=true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./traefik.yml:/traefik.yml
-      - ./certs:/certs
 
   db:
     image: postgres:13
@@ -25,6 +23,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
 
+  # TRUCO: Usar restart: unless-stopped para que las réplicas que fallan por migraciones concurrentes se reinicien
   redmine:
     image: redmine:5.0
     depends_on:
@@ -34,13 +33,20 @@ services:
       REDMINE_DB_DATABASE: redmine
       REDMINE_DB_USERNAME: redmine
       REDMINE_DB_PASSWORD: secret
+    restart: unless-stopped  # IMPORTANTE: reintentar si falla
     labels:
       - "traefik.enable=true"
+      # HTTP
+      - "traefik.http.routers.redmine-http.rule=Host(`redmine.localhost`)"
+      - "traefik.http.routers.redmine-http.entrypoints=web"
+      - "traefik.http.routers.redmine-http.middlewares=redirect-https"
+      # HTTPS
       - "traefik.http.routers.redmine.rule=Host(`redmine.localhost`)"
       - "traefik.http.routers.redmine.entrypoints=websecure"
-      - "traefik.http.routers.redmine.tls=true"
       - "traefik.http.services.redmine.loadbalancer.server.port=3000"
       - "traefik.http.services.redmine.loadbalancer.sticky.cookie=true"
+      # Redirect HTTP to HTTPS
+      - "traefik.http.middlewares.redirect-https.redirectscheme.scheme=https"
 
   pgadmin:
     image: dpage/pgadmin4
@@ -49,19 +55,25 @@ services:
       PGADMIN_DEFAULT_PASSWORD: admin
     labels:
       - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin-http.rule=Host(`pgadmin.localhost`)"
+      - "traefik.http.routers.pgadmin-http.entrypoints=web"
+      - "traefik.http.routers.pgadmin-http.middlewares=redirect-https"
       - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.localhost`)"
       - "traefik.http.routers.pgadmin.entrypoints=websecure"
-      - "traefik.http.routers.pgadmin.tls=true"
       - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+      - "traefik.http.middlewares.redirect-https.redirectscheme.scheme=https"
 
   maildev:
     image: maildev/maildev
     labels:
       - "traefik.enable=true"
+      - "traefik.http.routers.maildev-http.rule=Host(`maildev.localhost`)"
+      - "traefik.http.routers.maildev-http.entrypoints=web"
+      - "traefik.http.routers.maildev-http.middlewares=redirect-https"
       - "traefik.http.routers.maildev.rule=Host(`maildev.localhost`)"
       - "traefik.http.routers.maildev.entrypoints=websecure"
-      - "traefik.http.routers.maildev.tls=true"
       - "traefik.http.services.maildev.loadbalancer.server.port=1080"
+      - "traefik.http.middlewares.redirect-https.redirectscheme.scheme=https"
 
 volumes:
   db_data:
